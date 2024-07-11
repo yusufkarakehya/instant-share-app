@@ -6,9 +6,10 @@ export enum DataType {
 
 }
 export interface Data {
-    file?: Blob
-    fileName?: string
-    fileType?: string
+    file: Blob
+    fileName: string
+    fileType: string
+    fileSize: number
     message?: string
 }
 
