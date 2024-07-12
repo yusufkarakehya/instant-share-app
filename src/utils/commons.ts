@@ -6,6 +6,7 @@ export enum DataType {
 
 }
 export interface Data {
+    type: string
     file: Blob
     fileName: string
     fileType: string
