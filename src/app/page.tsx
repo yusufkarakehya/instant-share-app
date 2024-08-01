@@ -1,6 +1,4 @@
 'use client';
-import { Data, DataType, formatBytes } from "@/utils/commons";
-import styles from "./page.module.css";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
 import { useEffect, useRef, useState } from "react";
@@ -11,26 +9,46 @@ import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
 import { ProgressBar } from "primereact/progressbar";
 import Peer, { DataConnection } from "peerjs";
+import { ColorPicker } from "primereact/colorpicker";
+import download from "js-file-download";
+
+interface InsFile {
+  uuid: string
+  name: string
+  type: string
+  size: number
+  file: File
+}
 
 export default function Home() {
   const [peerId, setPeerId] = useState<string>('');
   const [peer, setPeer] = useState<Peer | null>(null);
   const [conn, setConn] = useState<DataConnection | null>(null);
-  // const [file, setFile] = useState<File | null>(null);
   const [remotePeerId, setRemotePeerId] = useState<string>('');
   const [url, setUrl] = useState<string>('');
   const [connected, setConnected] = useState<boolean>(false);
   const [totalSize, setTotalSize] = useState(0);
   const [selectedFileCount, setSelectedFileCount] = useState(0);
-  const [files, setFiles] = useState<File[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [incomingFiles, setIncomingFiles] = useState<Data[]>([]);
+  const [files, setFiles] = useState<InsFile[]>([]);
+  const [progress, setProgress] = useState<{ [key: string]: number }>({});
+  const [incomingFiles, setIncomingFiles] = useState<InsFile[]>([]);
   const [incomingProgress, setIncomingProgress] = useState<{ [key: string]: number }>({});
+  const [uploaded, setUploaded] = useState<boolean>(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useRef<Toast>(null);
   const searchParams = useSearchParams();
+
+  const ACCEPTED_TYPES = ['image/', 'video/'];
+
+  const closeConnection = () => {
+    if (conn) {
+      conn.close();
+    }
+    if (peer) {
+      peer.destroy();
+    }
+  };
 
   useEffect(() => {
     const _token = searchParams.get('token');
@@ -39,42 +57,50 @@ export default function Home() {
       setRemotePeerId(_token);
     }
 
-    const peerInstance = new Peer()
+    const peerInstance = new Peer();
     peerInstance.on('open', (id) => {
       setPeerId(id);
     }).on('error', (err) => {
       if (err.message.startsWith('Could not connect to peer')) {
         toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not connect to peer', life: 3000 });
         setConnected(false);
-        console.log("48")
       }
       else {
         setConnected(false);
-        console.log("53")
       }
     });
 
+    //sender
     peerInstance.on('connection', (conn) => {
       toast.current?.show({ severity: 'info', summary: 'Info', detail: "Connection established", life: 3000 });
       setConn(conn);
       setConnected(true);
-      console.log("60")
 
+      //sender
       conn.on('close', function () {
         toast.current?.show({ severity: 'error', summary: 'Error', detail: "Connection closed", life: 3000 });
         setConn(null);
         setConnected(false);
-        console.log("66")
+      });
+
+      //sender getting data from receiver 
+      conn.on('data', (data: any) => {
+        setProgress((prevProgress) => ({
+          ...prevProgress,
+          [data.name]: 100,
+        }));
       });
 
     });
 
     setPeer(peerInstance);
 
+    window.addEventListener('beforeunload', closeConnection);
+
     return () => {
-      peerInstance.destroy();
+      window.removeEventListener('beforeunload', closeConnection);
     };
-  }, []);
+  }, [conn]);
 
   const handleCopyClipboard = async () => {
     await navigator.clipboard.writeText(url);
@@ -84,110 +110,77 @@ export default function Home() {
     if (peer && remotePeerId) {
       const connection = peer.connect(remotePeerId);
 
-      // connection.on('data', function (receivedData) {
-      //   let data = receivedData as Data
-      //   console.log(data);
-
-      //   setIncomingFiles((prev) => [...prev, data]);
-      // })
-
+      //receiver getting data from sender
       connection.on('data', (data: any) => {
-        if (data.type === 'file') {
-          console.log(data);
+        download(data.file || '', data.name || "File Name", data.type)
 
-          const fileInfo = data;
-          const receivedChunks: BlobPart[] = [];
-          setIncomingFiles((prev) => [...prev, fileInfo]);
+        const file = incomingFiles.find((f: InsFile) => f.uuid === data.uuid);
+        if (!file) {
+          setIncomingFiles((prevFiles) => [...prevFiles, data]);
+          setIncomingProgress((prevProgress) => ({
+            ...prevProgress,
+            [data.name]: 100,
+          }));
 
-          connection?.on('data', (chunk: any) => {
-            console.log(chunk);
-            if (chunk === 'end') {
-              const blob = new Blob(receivedChunks);
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = fileInfo.fileName;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-
-              // setIncomingFiles((prev) => [...prev, fileInfo]);
-              setIncomingProgress((prevProgress) => ({
-                ...prevProgress,
-                [fileInfo.name]: 100,
-              }));
-            } else {
-              const progress = Math.round(((chunk.length + receivedChunks.length) * 100) / (fileInfo.fileSize));
-              setIncomingProgress((prevProgress) => ({
-                ...prevProgress,
-                [fileInfo.name]: progress,
-              }));
-
-              receivedChunks.push(chunk);
-            }
-          });
+          connection.send({ name: data.name, uuid: data.uuid })
         }
       });
 
+      //receiver
       connection.on('close', function () {
         toast.current?.show({ severity: 'error', summary: 'Error', detail: "Connection closed", life: 3000 });
         setConn(null);
         setConnected(false);
-        console.log("97");
       });
 
+      //receiver
       connection.on('open', () => {
         toast.current?.show({ severity: 'info', summary: 'Info', detail: "Connection established", life: 3000 });
         setConn(connection);
         setConnected(true);
-        console.log("104");
       });
+
     }
   };
 
-  const CHUNK_SIZE = 64 * 1024; // 64 KB
-
-  const onUploadClick = async () => {
+  const onUploadClick = () => {
     if (files.length > 0) {
+      setUploaded(true);
       for (let file of files) {
-        if (conn) {
-          // let blob = new Blob([file], { type: file.type });
-          // conn.send({
-          //   file: blob,
-          //   fileName: file.name,
-          //   fileType: file.type,
-          //   fileSize: file.size,
-          // });
-          const fileInfo = {
-            type: 'file',
-            fileName: file.name,
-            fileSize: file.size,
-          };
-          conn.send(fileInfo);
-
-          let offset = 0;
-
-          const readChunk = () => {
-            const reader = new FileReader();
-            const slice = file.slice(offset, offset + CHUNK_SIZE);
-            reader.onload = (e) => {
-              if (e.target?.result) {
-                conn.send(e.target.result);
-                offset += CHUNK_SIZE;
-                if (offset < file.size) {
-                  readChunk();
-                } else {
-                  conn.send('end');
-                }
-              }
-            };
-            reader.readAsArrayBuffer(slice);
-          };
-
-          readChunk();
+        const isValidType = ACCEPTED_TYPES.some(type => file.type.startsWith(type));
+        if (isValidType) {
+          try {
+            if (conn) {
+              conn.send(file);
+            }
+          } catch (error) {
+            if (typeof error === "string") {
+              toast.current?.show({ severity: 'error', summary: 'Error', detail: error, life: 3000 });
+            } else if (error instanceof Error) {
+              toast.current?.show({ severity: 'error', summary: 'Error', detail: error.message, life: 3000 });
+            }
+          }
+        } else {
+          toast.current?.show({ severity: 'warn', summary: "Warning", detail: `Unsupported file type. File Name: ${file.name}`, life: 3000 });
         }
       }
     }
+  }
+
+  const formatBytes = (bytes: number) => {
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    if (bytes === 0) return '0 Byte';
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const formattedSize = parseFloat((bytes / Math.pow(1024, i)).toFixed(2));
+    return `${formattedSize} ${sizes[i]}`;
+  }
+
+  const generateUUID = () => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = Math.random() * 16 | 0;
+      const v = (c === 'x') ? ((r & 0x3) | 0x8) : r & 0xf;
+      return v.toString(16);
+    });
   }
 
   const onCreateConnectionClick = async () => {
@@ -196,30 +189,38 @@ export default function Home() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      let _totalSize = 0;
-      let newFiles = Array.from(e.target.files);
+      let fileList: InsFile[] = [];
 
-      for (let i = 0; i < newFiles.length; i++) {
-        _totalSize += newFiles[i].size || 0;
+      let _totalSize = 0;
+      for (let i = 0; i < e.target.files.length; i++) {
+        _totalSize += e.target.files[i].size || 0;
+        fileList.push({
+          uuid: generateUUID(),
+          name: e.target.files[i].name,
+          type: e.target.files[i].type,
+          size: e.target.files[i].size,
+          file: e.target.files[i]
+        })
       }
 
       setTotalSize(_totalSize);
-      setFiles(newFiles);
-      setSelectedFileCount(newFiles.length);
+      setFiles(fileList);
+      setSelectedFileCount(e.target.files.length);
     }
   };
 
   const onChooseClick = () => {
     fileInputRef.current?.click();
+    setUploaded(false);
   }
 
   const onClearClick = () => {
-    if (files.length > 0) {
-      setFiles([]);
-      setSelectedFileCount(0);
-      setTotalSize(0);
-      fileInputRef!.current!.value = '';
-    }
+    setSelectedFileCount(0);
+    setTotalSize(0);
+    fileInputRef!.current!.value = '';
+    setFiles([]);
+    setProgress({});
+    setUploaded(false);
   }
 
   return (
@@ -233,7 +234,7 @@ export default function Home() {
               remotePeerId ?
                 <>
                   <div className="p-inputgroup">
-                    <Button label={"Allow Connection"} severity="info" disabled={!remotePeerId || connected} onClick={connectToPeer} />
+                    <Button label={"Allow Connection"} severity="info" disabled={!remotePeerId || connected || !peerId} onClick={connectToPeer} />
                   </div>
                   <div className="card flex flex-column md:flex-row gap-3 mt-3">
                     <div className="p-inputgroup flex-1">
@@ -246,7 +247,7 @@ export default function Home() {
                 </> :
                 <>
                   <div className="p-inputgroup">
-                    <Button label={"Create Connection Url"} severity="info" disabled={!!url} onClick={onCreateConnectionClick} />
+                    <Button label={"Create Connection Url"} severity="info" disabled={!!url || !peerId} onClick={onCreateConnectionClick} />
                   </div>
                   <div className="card flex flex-column md:flex-row gap-3 mt-3">
                     <div className="p-inputgroup flex-1">
@@ -271,40 +272,28 @@ export default function Home() {
                     <div className="card mb-0 px-3" style={{ borderRadius: "0 0 0 0" }}>
                       {
                         connected ?
-                          <Message severity="info" text={"Connected. Waiting for the files."} /> :
-                          <Message severity="warn" text={"Waiting for the connection."} />
-                      }
-                      {/* <h5>{"incoming-files"}</h5>
-                      {incomingFiles.length > 0 ? incomingFiles.map((file) => (
-                        <div className="grid mb-3 flex align-items-center" key={file.fileName}>
-                          <div className="col-5">
-                            {file.fileName}
+                          <div className="flex align-items-center justify-content-start gap-2">
+                            <Message severity="info" text={"Connected. Waiting for the files."} />
+                            <ColorPicker disabled format="hex" value={"00ff00"} />
+                          </div> :
+                          <div className="flex align-items-center justify-content-start gap-2">
+                            <Message severity="warn" text={"Waiting for the connection."} />
+                            <ColorPicker disabled format="hex" value={"ff0000"} />
                           </div>
-                          <div className="col-3">
-                            <Tag value={formatBytes(file.fileSize)} severity="warning" />
+                      }
+                      <h5>{"Incoming Files"}</h5>
+                      {incomingFiles.length > 0 ? incomingFiles.map((file) => (
+                        <div className="grid mb-3 flex align-items-center" key={file.uuid}>
+                          <div className="col-6">
+                            {file.name}
+                          </div>
+                          <div className="col-6">
+                            <ProgressBar value={incomingProgress[file.name] || 0}></ProgressBar>
                           </div>
                         </div>
                       )) :
-                        <div>{"no-incoming-files"}</div>
-                      } */}
-
-                      <h5>{"incoming-files"}</h5>
-                      {incomingFiles.length > 0 ? incomingFiles.map((file) => (
-                        <div className="grid mb-3 flex align-items-center" key={file.fileName}>
-                          <div className="col-6">
-                            {file.fileName}
-                          </div>
-                          <div className="col-6">
-                            <ProgressBar value={uploadProgress[file.fileName] || 0}></ProgressBar>
-                          </div>
-                        </div>
-                      )) :
-                        <div>{"no-incoming-files"}</div>
+                        <div>{"No Incoming Files"}</div>
                       }
-
-
-
-
 
                     </div>
                   </div> :
@@ -312,27 +301,39 @@ export default function Home() {
                     <div className="card mb-0 pt-0 pl-3 pb-3">
                       {
                         connected ?
-                          <Message severity="info" text={"Connected. You can send files."} /> :
-                          <Message severity="warn" text={"Waiting for the connection."} />
+                          <div className="grid flex align-items-center">
+                            <div className="flex flex-1 align-items-center justify-content-start gap-2">
+                              <Message severity="info" text={"Connected. You can send files."} />
+                              <ColorPicker disabled format="hex" value={"00ff00"} />
+                            </div>
+                            <div className="flex flex-1 align-items-center justify-content-end gap-2">
+                              <Message severity="info" className="mr-3" text={`Selected File Count: ${selectedFileCount}`} />
+                              <Message severity="info" className="mr-3" text={`Total Size: ${formatBytes(totalSize)}`} />
+                            </div>
+                          </div> :
+                          <div className="flex-1 align-items-center justify-content-start gap-2">
+                            <Message severity="warn" text={"Waiting for the connection."} />
+                            <ColorPicker disabled format="hex" value={"ff0000"} />
+                          </div>
                       }
                     </div>
                     <div className="card mb-0 p-3" style={{ borderRadius: "6px 6px 0 0" }}>
                       <div className="grid flex align-items-center">
                         <div className="col">
                           <input ref={fileInputRef} accept="image/*,video/*" type="file" multiple onChange={handleFileChange} style={{ display: 'none' }} />
-                          <Button icon="pi pi-images" tooltip={"choose"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            rounded outlined severity="info" aria-label={"choose"} onClick={onChooseClick} />
-                          <Button icon="pi pi-upload" tooltip={"upload"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            disabled={!connected} rounded outlined severity="success" aria-label={"upload"} onClick={onUploadClick} />
-                          <Button icon="pi pi-times" tooltip={"clear"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            disabled={files.length === 0} rounded outlined severity="danger" aria-label={"clear"} onClick={onClearClick} />
+                          <Button icon="pi pi-images" tooltip={"Choose"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
+                            rounded outlined severity="info" aria-label={"Choose"} onClick={onChooseClick} />
+                          <Button icon="pi pi-upload" tooltip={"Upload"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
+                            disabled={!connected || files.length === 0 || uploaded} rounded outlined severity="success" aria-label={"Upload"} onClick={onUploadClick} />
+                          <Button icon="pi pi-times" tooltip={"Clear"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
+                            disabled={files.length === 0} rounded outlined severity="danger" aria-label={"Clear"} onClick={onClearClick} />
                         </div>
                       </div>
                     </div>
                     <div className="card mb-0 p-3" style={{ borderRadius: "0 0 0 0" }}>
-                      <h5>{"files-to-upload"}</h5>
-                      {files.length > 0 ? files.map((file) => (
-                        <div className="grid mb-3 flex align-items-center" key={file.name}>
+                      <h5>{"Files To Upload"}</h5>
+                      {files.length > 0 ? files.map((file: any) => (
+                        <div className="grid mb-3 flex align-items-center" key={file.uuid}>
                           <div className="col-5">
                             {file.name}
                           </div>
@@ -340,29 +341,11 @@ export default function Home() {
                             <Tag value={formatBytes(file.size)} severity="warning" />
                           </div>
                           <div className="col-4">
-                            <ProgressBar value={uploadProgress[file.name] || 0}></ProgressBar>
+                            <ProgressBar value={progress[file.name] || 0}></ProgressBar>
                           </div>
                         </div>
                       )) :
-                        <div>{"no-file-selected"}</div>
-                      }
-                    </div>
-                    <div className="card mb-0 p-3" style={{ borderRadius: "0 0 6px 6px" }}>
-                      <h5>{"uploaded-files"}</h5>
-                      {uploadedFiles.length > 0 ? uploadedFiles.map((uploadedFile) => (
-                        <div className="grid mb-3 flex align-items-center" key={uploadedFile.name}>
-                          <div className="col-5">
-                            {uploadedFile.name}
-                          </div>
-                          <div className="col-3">
-                            <Tag value={formatBytes(uploadedFile.size)} severity="warning" />
-                          </div>
-                          <div className="col-4">
-                            <ProgressBar value={100}></ProgressBar>
-                          </div>
-                        </div>
-                      )) :
-                        <div>{"no-uploaded-files"}</div>
+                        <div>{"No File Selected"}</div>
                       }
                     </div>
                   </div>
