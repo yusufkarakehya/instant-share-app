@@ -298,10 +298,10 @@ export default function Home() {
                     </div>
                   </div> :
                   <div className="col-12 pt-0">
-                    <div className="card mb-0 pt-0 pl-3 pb-3">
+                    <div className="card mb-0 px-3">
                       {
                         connected ?
-                          <div className="grid flex align-items-center">
+                          <div className="grid flex">
                             <div className="flex flex-1 align-items-center justify-content-start gap-2">
                               <Message severity="info" text={"Connected. You can send files."} />
                               <ColorPicker disabled format="hex" value={"00ff00"} />
@@ -311,7 +311,7 @@ export default function Home() {
                               <Message severity="info" className="mr-3" text={`Total Size: ${formatBytes(totalSize)}`} />
                             </div>
                           </div> :
-                          <div className="flex-1 align-items-center justify-content-start gap-2">
+                          <div className="flex align-items-center justify-content-start gap-2">
                             <Message severity="warn" text={"Waiting for the connection."} />
                             <ColorPicker disabled format="hex" value={"ff0000"} />
                           </div>
