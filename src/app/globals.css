@@ -19,3 +19,25 @@ body {
 body.blocked-scroll {
   overflow: auto;
 }
+
+.ins-p-8 {
+  padding: 2rem;
+}
+
+@media (max-width: 600px) {
+  .ins-p-8 {
+    padding: 1rem;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 1024px) {
+  .ins-p-8 {
+    padding: 1.5rem;
+  }
+}
+
+@media (min-width: 1025px) {
+  .ins-p-8 {
+    padding: 2.5rem;
+  }
+}

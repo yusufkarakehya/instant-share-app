@@ -27,8 +27,8 @@ export default function Home() {
   const [remotePeerId, setRemotePeerId] = useState<string>('');
   const [url, setUrl] = useState<string>('');
   const [connected, setConnected] = useState<boolean>(false);
-  const [totalSize, setTotalSize] = useState(0);
-  const [selectedFileCount, setSelectedFileCount] = useState(0);
+  // const [totalSize, setTotalSize] = useState(0);
+  // const [selectedFileCount, setSelectedFileCount] = useState(0);
   const [files, setFiles] = useState<InsFile[]>([]);
   const [progress, setProgress] = useState<{ [key: string]: number }>({});
   const [incomingFiles, setIncomingFiles] = useState<InsFile[]>([]);
@@ -112,8 +112,6 @@ export default function Home() {
 
       //receiver getting data from sender
       connection.on('data', (data: any) => {
-        download(data.file || '', data.name || "File Name", data.type)
-
         const file = incomingFiles.find((f: InsFile) => f.uuid === data.uuid);
         if (!file) {
           setIncomingFiles((prevFiles) => [...prevFiles, data]);
@@ -191,9 +189,9 @@ export default function Home() {
     if (e.target.files) {
       let fileList: InsFile[] = [];
 
-      let _totalSize = 0;
+      // let _totalSize = 0;
       for (let i = 0; i < e.target.files.length; i++) {
-        _totalSize += e.target.files[i].size || 0;
+        // _totalSize += e.target.files[i].size || 0;
         fileList.push({
           uuid: generateUUID(),
           name: e.target.files[i].name,
@@ -203,9 +201,9 @@ export default function Home() {
         })
       }
 
-      setTotalSize(_totalSize);
+      // setTotalSize(_totalSize);
       setFiles(fileList);
-      setSelectedFileCount(e.target.files.length);
+      // setSelectedFileCount(e.target.files.length);
     }
   };
 
@@ -215,26 +213,31 @@ export default function Home() {
   }
 
   const onClearClick = () => {
-    setSelectedFileCount(0);
-    setTotalSize(0);
+    // setSelectedFileCount(0);
+    // setTotalSize(0);
     fileInputRef!.current!.value = '';
     setFiles([]);
     setProgress({});
     setUploaded(false);
   }
 
+  const handleDownload = (file: InsFile) => {
+    download(file.file || '', file.name || "File Name", file.type)
+  }
+
   return (
     <div>
       <Toast ref={toast} />
-      <div className="p-8">
+      <div className="ins-p-8">
         <div className="card">
           <h1>Instant File Share</h1>
           <Card className="px-3">
             {
               remotePeerId ?
                 <>
-                  <div className="p-inputgroup">
+                  <div>
                     <Button label={"Allow Connection"} severity="info" disabled={!remotePeerId || connected || !peerId} onClick={connectToPeer} />
+                    <Button label={"Disconnect"} className="ml-3" severity="danger" disabled={!connected} onClick={closeConnection} />
                   </div>
                   <div className="card flex flex-column md:flex-row gap-3 mt-3">
                     <div className="p-inputgroup flex-1">
@@ -284,11 +287,16 @@ export default function Home() {
                       <h5>{"Incoming Files"}</h5>
                       {incomingFiles.length > 0 ? incomingFiles.map((file) => (
                         <div className="grid mb-3 flex align-items-center" key={file.uuid}>
-                          <div className="col-6">
+                          <div className="col-5">
                             {file.name}
                           </div>
-                          <div className="col-6">
-                            <ProgressBar value={incomingProgress[file.name] || 0}></ProgressBar>
+                          <div className="col-3">
+                            <Tag value={formatBytes(file.size)} severity="warning" />
+                          </div>
+                          <div className="col-4">
+                            {/* <ProgressBar value={incomingProgress[file.name] || 0}></ProgressBar> */}
+                            <Button icon="pi pi-download" tooltip={"Download"} tooltipOptions={{ position: 'bottom' }} style={{ marginLeft: '0.5rem' }}
+                              disabled={!incomingProgress[file.name]} rounded outlined severity="success" aria-label={"Download"} onClick={() => handleDownload(file)} />
                           </div>
                         </div>
                       )) :
@@ -306,10 +314,10 @@ export default function Home() {
                               <Message severity="info" text={"Connected. You can send files."} />
                               <ColorPicker disabled format="hex" value={"00ff00"} />
                             </div>
-                            <div className="flex flex-1 align-items-center justify-content-end gap-2">
+                            {/* <div className="flex flex-1 align-items-center justify-content-end gap-2">
                               <Message severity="info" className="mr-3" text={`Selected File Count: ${selectedFileCount}`} />
                               <Message severity="info" className="mr-3" text={`Total Size: ${formatBytes(totalSize)}`} />
-                            </div>
+                            </div> */}
                           </div> :
                           <div className="flex align-items-center justify-content-start gap-2">
                             <Message severity="warn" text={"Waiting for the connection."} />
@@ -322,7 +330,7 @@ export default function Home() {
                         <div className="col">
                           <input ref={fileInputRef} accept="image/*,video/*" type="file" multiple onChange={handleFileChange} style={{ display: 'none' }} />
                           <Button icon="pi pi-images" tooltip={"Choose"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            rounded outlined severity="info" aria-label={"Choose"} onClick={onChooseClick} />
+                            disabled={uploaded} rounded outlined severity="info" aria-label={"Choose"} onClick={onChooseClick} />
                           <Button icon="pi pi-upload" tooltip={"Upload"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
                             disabled={!connected || files.length === 0 || uploaded} rounded outlined severity="success" aria-label={"Upload"} onClick={onUploadClick} />
                           <Button icon="pi pi-times" tooltip={"Clear"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
