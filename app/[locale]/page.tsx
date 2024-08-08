@@ -89,10 +89,15 @@ export default function Home() {
 
     setPeer(peerInstance);
 
-    window.addEventListener('beforeunload', closeConnection);
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      window.removeEventListener('beforeunload', closeConnection);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [conn]);
 
