@@ -11,6 +11,9 @@ import { ProgressBar } from "primereact/progressbar";
 import Peer, { DataConnection } from "peerjs";
 import { ColorPicker } from "primereact/colorpicker";
 import download from "js-file-download";
+import LanguageSwitcher from "./LanguageSwitcher";
+import { useTranslations } from 'next-intl';
+import { Checkbox } from "primereact/checkbox";
 
 interface InsFile {
   uuid: string
@@ -27,18 +30,16 @@ export default function Home() {
   const [remotePeerId, setRemotePeerId] = useState<string>('');
   const [url, setUrl] = useState<string>('');
   const [connected, setConnected] = useState<boolean>(false);
-  // const [totalSize, setTotalSize] = useState(0);
-  // const [selectedFileCount, setSelectedFileCount] = useState(0);
   const [files, setFiles] = useState<InsFile[]>([]);
   const [progress, setProgress] = useState<{ [key: string]: number }>({});
   const [incomingFiles, setIncomingFiles] = useState<InsFile[]>([]);
-  const [incomingProgress, setIncomingProgress] = useState<{ [key: string]: number }>({});
+  const [downloadedFiles, setDownloadedFiles] = useState<{ [key: string]: boolean }>({});
   const [uploaded, setUploaded] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useRef<Toast>(null);
   const searchParams = useSearchParams();
-
+  const t = useTranslations();
   const ACCEPTED_TYPES = ['image/', 'video/'];
 
   const closeConnection = () => {
@@ -62,7 +63,7 @@ export default function Home() {
       setPeerId(id);
     }).on('error', (err) => {
       if (err.message.startsWith('Could not connect to peer')) {
-        toast.current?.show({ severity: 'error', summary: 'Error', detail: 'Could not connect to peer', life: 3000 });
+        toast.current?.show({ severity: 'error', summary: t("error"), detail: t("could-not-connect"), life: 3000 });
         setConnected(false);
       }
       else {
@@ -72,25 +73,18 @@ export default function Home() {
 
     //sender
     peerInstance.on('connection', (conn) => {
-      toast.current?.show({ severity: 'info', summary: 'Info', detail: "Connection established", life: 3000 });
+      toast.current?.show({ severity: 'info', summary: t("info"), detail: t("connection-established"), life: 3000 });
       setConn(conn);
       setConnected(true);
+      setUploaded(false);
+      setProgress({});
 
       //sender
       conn.on('close', function () {
-        toast.current?.show({ severity: 'error', summary: 'Error', detail: "Connection closed", life: 3000 });
+        toast.current?.show({ severity: 'error', summary: t("error"), detail: t("connection-closed"), life: 3000 });
         setConn(null);
         setConnected(false);
       });
-
-      //sender getting data from receiver 
-      conn.on('data', (data: any) => {
-        setProgress((prevProgress) => ({
-          ...prevProgress,
-          [data.name]: 100,
-        }));
-      });
-
     });
 
     setPeer(peerInstance);
@@ -104,6 +98,7 @@ export default function Home() {
 
   const handleCopyClipboard = async () => {
     await navigator.clipboard.writeText(url);
+    toast.current?.show({ severity: 'info', summary: t("info"), detail: t("copied"), life: 3000 });
   }
 
   const connectToPeer = () => {
@@ -112,28 +107,28 @@ export default function Home() {
 
       //receiver getting data from sender
       connection.on('data', (data: any) => {
-        const file = incomingFiles.find((f: InsFile) => f.uuid === data.uuid);
-        if (!file) {
-          setIncomingFiles((prevFiles) => [...prevFiles, data]);
-          setIncomingProgress((prevProgress) => ({
-            ...prevProgress,
-            [data.name]: 100,
-          }));
+        if (typeof (data) === "string" && data === "finished") {
+          toast.current?.show({ severity: 'info', summary: t("info"), detail: t("all-files-received"), life: 3000 });
+        } else {
+          const file = incomingFiles.find((f: InsFile) => f.uuid === data.uuid);
+          if (!file) {
+            setIncomingFiles((prevFiles) => [...prevFiles, data]);
 
-          connection.send({ name: data.name, uuid: data.uuid })
+            connection.send({ name: data.name, uuid: data.uuid })
+          }
         }
       });
 
       //receiver
       connection.on('close', function () {
-        toast.current?.show({ severity: 'error', summary: 'Error', detail: "Connection closed", life: 3000 });
+        toast.current?.show({ severity: 'error', summary: t("error"), detail: t("connection-closed"), life: 3000 });
         setConn(null);
         setConnected(false);
       });
 
       //receiver
       connection.on('open', () => {
-        toast.current?.show({ severity: 'info', summary: 'Info', detail: "Connection established", life: 3000 });
+        toast.current?.show({ severity: 'info', summary: t("info"), detail: t("connection-established"), life: 3000 });
         setConn(connection);
         setConnected(true);
       });
@@ -141,26 +136,33 @@ export default function Home() {
     }
   };
 
-  const onUploadClick = () => {
+  const onUploadClick = async () => {
     if (files.length > 0) {
       setUploaded(true);
-      for (let file of files) {
-        const isValidType = ACCEPTED_TYPES.some(type => file.type.startsWith(type));
-        if (isValidType) {
-          try {
-            if (conn) {
+      if (conn) {
+        for (const file of files) {
+          const isValidType = ACCEPTED_TYPES.some(type => file.type.startsWith(type));
+          if (isValidType) {
+            await new Promise<void>((resolve, reject) => {
               conn.send(file);
-            }
-          } catch (error) {
-            if (typeof error === "string") {
-              toast.current?.show({ severity: 'error', summary: 'Error', detail: error, life: 3000 });
-            } else if (error instanceof Error) {
-              toast.current?.show({ severity: 'error', summary: 'Error', detail: error.message, life: 3000 });
-            }
+              conn.on('data', (data: any) => {
+                setProgress((prevProgress) => ({
+                  ...prevProgress,
+                  [data.name]: 100,
+                }));
+                resolve();
+              });
+
+              conn.on('error', (err) => {
+                reject(err);
+              });
+            });
+          } else {
+            toast.current?.show({ severity: 'warn', summary: t("warning"), detail: `${t("unsupported-file")} ${t("file-name")}: ${file.name}`, life: 3000 });
           }
-        } else {
-          toast.current?.show({ severity: 'warn', summary: "Warning", detail: `Unsupported file type. File Name: ${file.name}`, life: 3000 });
         }
+        conn.send("finished");
+        toast.current?.show({ severity: 'info', summary: t("info"), detail: t("all-files-sent"), life: 3000 });
       }
     }
   }
@@ -189,9 +191,7 @@ export default function Home() {
     if (e.target.files) {
       let fileList: InsFile[] = [];
 
-      // let _totalSize = 0;
       for (let i = 0; i < e.target.files.length; i++) {
-        // _totalSize += e.target.files[i].size || 0;
         fileList.push({
           uuid: generateUUID(),
           name: e.target.files[i].name,
@@ -201,9 +201,7 @@ export default function Home() {
         })
       }
 
-      // setTotalSize(_totalSize);
       setFiles(fileList);
-      // setSelectedFileCount(e.target.files.length);
     }
   };
 
@@ -213,8 +211,6 @@ export default function Home() {
   }
 
   const onClearClick = () => {
-    // setSelectedFileCount(0);
-    // setTotalSize(0);
     fileInputRef!.current!.value = '';
     setFiles([]);
     setProgress({});
@@ -223,6 +219,10 @@ export default function Home() {
 
   const handleDownload = (file: InsFile) => {
     download(file.file || '', file.name || "File Name", file.type)
+    setDownloadedFiles((downloadedFiles) => ({
+      ...downloadedFiles,
+      [file.name]: true,
+    }));
   }
 
   return (
@@ -230,27 +230,30 @@ export default function Home() {
       <Toast ref={toast} />
       <div className="ins-p-8">
         <div className="card">
-          <h1>Instant File Share</h1>
+          <div className="flex align-items-center justify-content-between">
+            <h1>{t("app-name")}</h1>
+            <LanguageSwitcher />
+          </div>
           <Card className="px-3">
             {
               remotePeerId ?
                 <>
                   <div>
-                    <Button label={"Allow Connection"} severity="info" disabled={!remotePeerId || connected || !peerId} onClick={connectToPeer} />
-                    <Button label={"Disconnect"} className="ml-3" severity="danger" disabled={!connected} onClick={closeConnection} />
+                    <Button label={t("allow-connection")} severity="info" disabled={!remotePeerId || connected || !peerId} onClick={connectToPeer} />
+                    <Button label={t("disconnect")} className="ml-3" severity="danger" disabled={!connected} onClick={closeConnection} />
                   </div>
                   <div className="card flex flex-column md:flex-row gap-3 mt-3">
-                    <div className="p-inputgroup flex-1">
+                    <div className="flex-1">
                       {!connected ?
-                        <Message severity="warn" text={"If you do not know the person who sent you this link, do not grant permission."} /> :
-                        <Message severity="warn" text={"The file transfer will start as soon as the sender clicks the send button."} />
+                        <Message severity="warn" text={t("dont-grant-permission")} /> :
+                        <Message severity="warn" text={t("transfer-will-begin")} />
                       }
                     </div>
                   </div>
                 </> :
                 <>
                   <div className="p-inputgroup">
-                    <Button label={"Create Connection Url"} severity="info" disabled={!!url || !peerId} onClick={onCreateConnectionClick} />
+                    <Button label={t("create-connection-url")} severity="info" disabled={!!url || !peerId} onClick={onCreateConnectionClick} />
                   </div>
                   <div className="card flex flex-column md:flex-row gap-3 mt-3">
                     <div className="p-inputgroup flex-1">
@@ -259,8 +262,8 @@ export default function Home() {
                         <Button icon="pi pi-clipboard" severity="secondary" tooltip="Copy to clipboard" disabled={!url} onClick={handleCopyClipboard} />
                       </span>
                     </div>
-                    <div className="p-inputgroup flex-1">
-                      <Message severity="info" text={"Copy and send this link to the person you want to send the files to."} />
+                    <div className="flex-1">
+                      <Message severity="info" text={t("copy-send-url")} />
                     </div>
                   </div>
                 </>
@@ -276,31 +279,34 @@ export default function Home() {
                       {
                         connected ?
                           <div className="flex align-items-center justify-content-start gap-2">
-                            <Message severity="info" text={"Connected. Waiting for the files."} />
-                            <ColorPicker disabled format="hex" value={"00ff00"} />
+                            <Message severity="info" text={`${t("connected")} ${t("waiting-files")}`} />
+                            <ColorPicker name="connectionStatus" disabled format="hex" value={"00ff00"} />
                           </div> :
-                          <div className="flex align-items-center justify-content-start gap-2">
-                            <Message severity="warn" text={"Waiting for the connection."} />
-                            <ColorPicker disabled format="hex" value={"ff0000"} />
+                          <div className="flex align-items-center justify-content-between">
+                            <div className="flex align-items-center justify-content-start gap-2">
+                              <Message severity="warn" text={t("waiting-connection")} />
+                              <ColorPicker name="connectionStatus" disabled format="hex" value={"ff0000"} />
+                            </div>
                           </div>
                       }
-                      <h5>{"Incoming Files"}</h5>
+                      <h5>{t("incoming-files")}</h5>
                       {incomingFiles.length > 0 ? incomingFiles.map((file) => (
                         <div className="grid mb-3 flex align-items-center" key={file.uuid}>
                           <div className="col-5">
                             {file.name}
                           </div>
                           <div className="col-3">
-                            <Tag value={formatBytes(file.size)} severity="warning" />
+                            <Tag style={{ fontSize: '12px' }} value={formatBytes(file.size)} severity="warning" />
                           </div>
-                          <div className="col-4">
-                            {/* <ProgressBar value={incomingProgress[file.name] || 0}></ProgressBar> */}
-                            <Button icon="pi pi-download" tooltip={"Download"} tooltipOptions={{ position: 'bottom' }} style={{ marginLeft: '0.5rem' }}
-                              disabled={!incomingProgress[file.name]} rounded outlined severity="success" aria-label={"Download"} onClick={() => handleDownload(file)} />
+                          <div className="col-1">
+                            <Checkbox checked={downloadedFiles[file.name] ? true : false} disabled></Checkbox>
+                          </div>
+                          <div className="col-3">
+                            <Button label={t("download")} icon="pi pi-download" severity="success" style={{ marginLeft: '0.5rem' }} onClick={() => handleDownload(file)} />
                           </div>
                         </div>
                       )) :
-                        <div>{"No Incoming Files"}</div>
+                        <div>{t("no-incoming-files")}</div>
                       }
 
                     </div>
@@ -311,49 +317,41 @@ export default function Home() {
                         connected ?
                           <div className="grid flex">
                             <div className="flex flex-1 align-items-center justify-content-start gap-2">
-                              <Message severity="info" text={"Connected. You can send files."} />
-                              <ColorPicker disabled format="hex" value={"00ff00"} />
+                              <Message severity="info" text={`${t("connected")} ${t("can-send-files")}`} />
+                              <ColorPicker name="connectionStatus" disabled format="hex" value={"00ff00"} />
                             </div>
-                            {/* <div className="flex flex-1 align-items-center justify-content-end gap-2">
-                              <Message severity="info" className="mr-3" text={`Selected File Count: ${selectedFileCount}`} />
-                              <Message severity="info" className="mr-3" text={`Total Size: ${formatBytes(totalSize)}`} />
-                            </div> */}
                           </div> :
                           <div className="flex align-items-center justify-content-start gap-2">
-                            <Message severity="warn" text={"Waiting for the connection."} />
-                            <ColorPicker disabled format="hex" value={"ff0000"} />
+                            <Message severity="warn" text={t("waiting-connection")} />
+                            <ColorPicker name="connectionStatus" disabled format="hex" value={"ff0000"} />
                           </div>
                       }
-                    </div>
-                    <div className="card mb-0 p-3" style={{ borderRadius: "6px 6px 0 0" }}>
-                      <div className="grid flex align-items-center">
+                      <div className="grid flex align-items-center mt-3">
                         <div className="col">
                           <input ref={fileInputRef} accept="image/*,video/*" type="file" multiple onChange={handleFileChange} style={{ display: 'none' }} />
-                          <Button icon="pi pi-images" tooltip={"Choose"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            disabled={uploaded} rounded outlined severity="info" aria-label={"Choose"} onClick={onChooseClick} />
-                          <Button icon="pi pi-upload" tooltip={"Upload"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            disabled={!connected || files.length === 0 || uploaded} rounded outlined severity="success" aria-label={"Upload"} onClick={onUploadClick} />
-                          <Button icon="pi pi-times" tooltip={"Clear"} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
-                            disabled={files.length === 0} rounded outlined severity="danger" aria-label={"Clear"} onClick={onClearClick} />
+                          <Button icon="pi pi-images" tooltip={t("choose")} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
+                            disabled={uploaded} rounded outlined severity="info" aria-label={t("choose")} onClick={onChooseClick} />
+                          <Button icon="pi pi-upload" tooltip={t("send")} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
+                            disabled={!connected || files.length === 0 || uploaded} rounded outlined severity="success" aria-label={t("send")} onClick={onUploadClick} />
+                          <Button icon="pi pi-times" tooltip={t("clear")} tooltipOptions={{ position: 'bottom' }} style={{ marginRight: '0.5rem' }}
+                            disabled={files.length === 0 || uploaded} rounded outlined severity="danger" aria-label={t("clear")} onClick={onClearClick} />
                         </div>
                       </div>
-                    </div>
-                    <div className="card mb-0 p-3" style={{ borderRadius: "0 0 0 0" }}>
-                      <h5>{"Files To Upload"}</h5>
+                      <h5>{t("files-to-upload")}</h5>
                       {files.length > 0 ? files.map((file: any) => (
                         <div className="grid mb-3 flex align-items-center" key={file.uuid}>
                           <div className="col-5">
                             {file.name}
                           </div>
                           <div className="col-3">
-                            <Tag value={formatBytes(file.size)} severity="warning" />
+                            <Tag style={{ fontSize: '12px' }} value={formatBytes(file.size)} severity="warning" />
                           </div>
                           <div className="col-4">
                             <ProgressBar value={progress[file.name] || 0}></ProgressBar>
                           </div>
                         </div>
                       )) :
-                        <div>{"No File Selected"}</div>
+                        <div>{t("no-files-selected")}</div>
                       }
                     </div>
                   </div>
